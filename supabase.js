@@ -13,8 +13,8 @@
 'use strict';
 
 const PIYE_CONFIG = {
-  SUPABASE_URL: 'https://YOUR_PROJECT_REF.supabase.co', // GANTI
-  SUPABASE_ANON_KEY: 'YOUR_ANON_PUBLIC_KEY', // GANTI
+  SUPABASE_URL: 'https://ovxmajovtrruojcnxbyr.supabase.co', // GANTI
+  SUPABASE_ANON_KEY: 'sb_publishable_06a469aYdOfwAoHaMfE_1g_6bSaVn4t', // GANTI
 
   // Endpoint terjemahan.
   // Kosongkan ('') untuk memakai MyMemory API langsung (publik, rate-limited).
