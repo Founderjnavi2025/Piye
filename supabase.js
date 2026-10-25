@@ -268,48 +268,91 @@ async function getFriendRequests() {
 /* =========================================================
  * CONVERSATIONS
  * ========================================================= */
-async function getOrCreateConversation(peerId) {
-  const { data: sess } = await client().auth.getSession();
-  const uid = sess.session.user.id;
 
-  // Find existing direct conversation between the two
-  const { data: mine, error: e1 } = await client()
-    .from('conversation_members')
-    .select('conversation_id')
-    .eq('user_id', uid);
+async function getOrCreateConversation(peerId) {
+  const db = client();
+
+  // 1. Pastikan user sudah login
+  const { data: sess, error: sessionError } =
+    await db.auth.getSession();
+
+  if (sessionError) throw sessionError;
+
+  const uid = sess?.session?.user?.id;
+
+  if (!uid) {
+    throw new Error("Lu harus login dulu.");
+  }
+
+  if (!peerId || peerId === uid) {
+    throw new Error("User tujuan chat tidak valid.");
+  }
+
+  // 2. Cari percakapan milik user yang sedang login
+  const { data: mine, error: e1 } = await db
+    .from("conversation_members")
+    .select("conversation_id")
+    .eq("user_id", uid);
+
   if (e1) throw e1;
 
-  const convIds = (mine || []).map((m) => m.conversation_id);
-  if (convIds.length) {
-    const { data: peerRows, error: e2 } = await client()
-      .from('conversation_members')
-      .select('conversation_id')
-      .eq('user_id', peerId)
-      .in('conversation_id', convIds);
+  const convIds = (mine || []).map(
+    (m) => m.conversation_id
+  );
+
+  // 3. Periksa apakah sudah ada percakapan bersama
+  if (convIds.length > 0) {
+    const { data: peerRows, error: e2 } = await db
+      .from("conversation_members")
+      .select("conversation_id")
+      .eq("user_id", peerId)
+      .in("conversation_id", convIds);
+
     if (e2) throw e2;
-    if (peerRows?.length) {
+
+    if (peerRows?.length > 0) {
       return { id: peerRows[0].conversation_id };
     }
   }
 
-  // Create new conversation + members
-  const { data: conv, error: e3 } = await client()
-    .from('conversations')
-    .insert({})
-    .select()
-    .single();
+  // 4. Buat ID percakapan di sisi browser
+  const conversationId = crypto.randomUUID();
+
+  // Jangan pakai .select() di sini.
+  // User belum menjadi anggota percakapan,
+  // sehingga policy SELECT bisa menolak hasilnya.
+  const { error: e3 } = await db
+    .from("conversations")
+    .insert({
+      id: conversationId
+    });
+
   if (e3) throw e3;
 
-  const { error: e4 } = await client()
-    .from('conversation_members')
-    .insert([
-      { conversation_id: conv.id, user_id: uid },
-      { conversation_id: conv.id, user_id: peerId },
-    ]);
+  // 5. Masukkan user yang login terlebih dahulu
+  const { error: e4 } = await db
+    .from("conversation_members")
+    .insert({
+      conversation_id: conversationId,
+      user_id: uid
+    });
+
   if (e4) throw e4;
 
-  return conv;
+  // 6. Setelah itu, masukkan user tujuan
+  const { error: e5 } = await db
+    .from("conversation_members")
+    .insert({
+      conversation_id: conversationId,
+      user_id: peerId
+    });
+
+  if (e5) throw e5;
+
+  // 7. Kembalikan ID agar bisa dipakai membuka chat
+  return { id: conversationId };
 }
+
 
 async function getConversations() {
   const { data: sess } = await client().auth.getSession();
