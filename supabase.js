@@ -13,8 +13,8 @@
 'use strict';
 
 const PIYE_CONFIG = {
-  SUPABASE_URL: 'https://ovxmajovtrruojcnxbyr.supabase.co', // GANTI
-  SUPABASE_ANON_KEY: 'sb_publishable_06a469aYdOfwAoHaMfE_1g_6bSaVn4t', // GANTI
+  SUPABASE_URL: 'https://ovxmajovtrruojcnxbyr.supabase.co', // URL project lu
+  SUPABASE_ANON_KEY: 'sb_publishable_06a469aYdOfwAoHaMfE_1g_6bSaVn4t', // Publishable key lu
 
   // Endpoint terjemahan.
   // Kosongkan ('') untuk memakai MyMemory API langsung (publik, rate-limited).
@@ -61,8 +61,9 @@ const LANGUAGES = [
 let supabaseClient = null;
 let configured = false;
 
+// FIX: Panggil initClient() agar status dicek saat runtime, bukan hanya baca variabel
 function isConfigured() {
-  return configured;
+  return !!initClient();
 }
 
 function initClient() {
@@ -485,7 +486,6 @@ function subscribeToConversationMessages(conversationId, onNew) {
 }
 
 function subscribeToUserChannels({ onNewMessage, onReadReceipt, onFriendRequest, onFriendshipChange, onConversationChange }) {
-  const { data } = { data: null };
   const ch = client().channel('user-events');
 
   if (onNewMessage) {
