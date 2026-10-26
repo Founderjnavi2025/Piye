@@ -1,14 +1,13 @@
 /**
- * PIYE — app.js
- * Logika frontend: routing view, rendering tiga lapisan pesan, interaksi UI.
- * Bergantung pada supabase.js (global: window.PIYE_API).
+ * PIYE — app.js (RECODED)
+ * Perubahan utama:
+ *  - translateMessage() sekarang return { text, provider }
+ *  - Realtime listener untuk message_translations (biar terjemahan muncul realtime)
+ *  - Handle update terjemahan yang masuk dari user lain
  */
 
 'use strict';
 
-/* =========================================================
- * STATE
- * ========================================================= */
 const AppState = {
   user: null,
   profile: null,
@@ -23,9 +22,6 @@ const AppState = {
   configMissing: false,
 };
 
-/* =========================================================
- * DOM SHORTCUTS
- * ========================================================= */
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
@@ -37,6 +33,7 @@ function showToast(msg, type = 'info') {
   const el = $('#toast');
   el.textContent = msg;
   el.className = `toast ${type}`;
+  el.classList.remove('hidden');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.add('hidden'), 3200);
 }
@@ -47,14 +44,6 @@ function showToast(msg, type = 'info') {
 function initials(name) {
   if (!name) return '?';
   return name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
-}
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 function timeLabel(iso) {
   if (!iso) return '';
@@ -80,7 +69,6 @@ function avatarStyle(profile, el) {
  * SPLASH & INIT
  * ========================================================= */
 async function init() {
-  // Populate language selects
   const langs = window.PIYE_API?.LANGUAGES || [];
   ['#register-language', '#settings-language'].forEach((sel) => {
     const el = $(sel);
@@ -94,21 +82,17 @@ async function init() {
     });
   });
 
-  // Suggest language from browser
   const suggested = window.PIYE_API?.suggestLanguage?.() || 'id';
   if ($('#register-language')) $('#register-language').value = suggested;
 
-  // Config check
   if (!window.PIYE_API || !window.PIYE_API.isConfigured()) {
     AppState.configMissing = true;
     $('#config-warning').classList.remove('hidden');
     hideSplash();
     showAuthScreen();
-    // disable auth buttons? Keep enabled but with clear error
     return;
   }
 
-  // Check existing session
   try {
     const { data } = await window.PIYE_API.getSession();
     if (data?.session?.user) {
@@ -123,7 +107,6 @@ async function init() {
     showAuthScreen();
   }
 
-  // Listen auth changes
   window.PIYE_API.onAuthChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session?.user) {
       if (!AppState.user) await loadProfileAndEnter();
@@ -140,12 +123,10 @@ function hideSplash() {
   s.style.opacity = '0';
   setTimeout(() => s.classList.add('hidden'), 400);
 }
-
 function showAuthScreen() {
   $('#auth-screen').classList.remove('hidden');
   $('#app-screen').classList.add('hidden');
 }
-
 function showAppScreen() {
   $('#auth-screen').classList.add('hidden');
   $('#app-screen').classList.remove('hidden');
@@ -157,7 +138,6 @@ async function loadProfileAndEnter() {
     AppState.user = session.data.session.user;
     let profile = await window.PIYE_API.getProfile(AppState.user.id);
     if (!profile) {
-      // First-time profile via trigger should exist; fallback
       profile = {
         id: AppState.user.id,
         username: 'user_' + AppState.user.id.slice(0, 6),
@@ -169,7 +149,6 @@ async function loadProfileAndEnter() {
     }
     AppState.profile = profile;
 
-    // Apply defaults
     AppState.layers.translation = true;
     AppState.layers.original = true;
     AppState.layers.reading = false;
@@ -178,11 +157,7 @@ async function loadProfileAndEnter() {
     showAppScreen();
     hideSplash();
 
-    await Promise.all([
-      loadConversations(),
-      loadFriends(),
-      loadFriendRequests(),
-    ]);
+    await Promise.all([loadConversations(), loadFriends(), loadFriendRequests()]);
     subscribeRealtime();
   } catch (e) {
     console.error('loadProfileAndEnter', e);
@@ -226,7 +201,6 @@ async function handleLogin(e) {
   btn.disabled = true;
   try {
     await window.PIYE_API.signInWithPassword(email, password);
-    // onAuthChange will handle
   } catch (err) {
     showToast(err.message || 'Gagal masuk.', 'error');
   } finally {
@@ -498,15 +472,12 @@ async function openConversation(conv) {
   $('#chat-active').classList.remove('hidden');
   $('#app-screen').classList.add('chat-open');
 
-  // Header
   const peer = AppState.activePeer;
   $('#peer-name').textContent = peer?.display_name || peer?.username || 'Pengguna';
   $('#peer-status').textContent = '@' + (peer?.username || '');
   avatarStyle(peer, $('#peer-avatar'));
 
-  // Reset layer checkboxes
   syncLayerUI();
-
   renderChatList();
   await loadMessages(conv.id);
   subscribeToMessages(conv.id);
@@ -560,9 +531,7 @@ function renderMessages() {
     container.appendChild(empty);
     return;
   }
-  AppState.messages.forEach((m) => {
-    container.appendChild(renderBubble(m));
-  });
+  AppState.messages.forEach((m) => container.appendChild(renderBubble(m)));
   container.scrollTop = container.scrollHeight;
 }
 
@@ -573,15 +542,13 @@ function renderBubble(m) {
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
 
-  // Layer 1: Original
   if (AppState.layers.original) {
     const orig = document.createElement('div');
     orig.className = 'bubble-original';
-    orig.textContent = m.original_text; // textContent = safe
+    orig.textContent = m.original_text;
     bubble.appendChild(orig);
   }
 
-  // Layer 2: Reading guide
   if (AppState.layers.reading && m.reading_guide) {
     const rg = document.createElement('div');
     rg.className = 'bubble-reading';
@@ -589,7 +556,6 @@ function renderBubble(m) {
     bubble.appendChild(rg);
   }
 
-  // Layer 3: Translation
   if (AppState.layers.translation) {
     const trans = m.translation;
     if (trans && trans.translated_text && trans.target_language === AppState.profile.language) {
@@ -616,7 +582,6 @@ function renderBubble(m) {
     }
   }
 
-  // Actions
   const actions = document.createElement('div');
   actions.className = 'bubble-actions';
   const copyBtn = document.createElement('button');
@@ -641,7 +606,6 @@ function renderBubble(m) {
   }
   bubble.appendChild(actions);
 
-  // Meta
   const meta = document.createElement('div');
   meta.className = 'bubble-meta';
   const time = document.createElement('span');
@@ -675,7 +639,6 @@ async function sendMessage() {
   const sourceLang = AppState.profile.language;
 
   try {
-    // Optimistic bubble
     const tempId = 'tmp_' + Date.now();
     const optimistic = {
       id: tempId,
@@ -691,15 +654,12 @@ async function sendMessage() {
     renderMessages();
 
     const saved = await window.PIYE_API.sendMessage(convId, text, sourceLang);
-    // Replace optimistic with saved
     AppState.messages = AppState.messages.filter((m) => m.id !== tempId);
     if (saved) AppState.messages.push(saved);
     renderMessages();
 
-    // Refresh conversations preview
     loadConversations();
 
-    // Fire translation (non-blocking)
     tryTranslationForMessage(saved, sourceLang).catch((e) => console.warn('translate err', e));
   } catch (err) {
     showToast('Gagal mengirim: ' + (err.message || err), 'error');
@@ -715,22 +675,17 @@ async function tryTranslationForMessage(message, sourceLang) {
   if (sourceLang === targetLang) return;
 
   try {
-    // Generate reading guide
     let readingGuide = null;
     try {
       readingGuide = await window.PIYE_API.generateReadingGuide(message.original_text, sourceLang);
     } catch (e) { /* ignore */ }
 
-    // Translate
-    const translated = await window.PIYE_API.translateMessage(
-      message.original_text,
-      sourceLang,
-      targetLang
-    );
+    const result = await window.PIYE_API.translateMessage(message.original_text, sourceLang, targetLang);
+    const translated = result?.text || '';
+    const provider = result?.provider || 'unknown';
 
-    await window.PIYE_API.saveTranslation(message.id, targetLang, translated, readingGuide, sourceLang);
+    await window.PIYE_API.saveTranslation(message.id, targetLang, translated, readingGuide, sourceLang, provider);
 
-    // Update local
     const idx = AppState.messages.findIndex((m) => m.id === message.id);
     if (idx >= 0) {
       AppState.messages[idx].reading_guide = readingGuide;
@@ -776,8 +731,13 @@ function subscribeRealtime() {
       onNewMessage: (msg) => handleIncomingMessage(msg),
       onReadReceipt: () => {},
       onFriendRequest: () => loadFriendRequests(),
-      onFriendshipChange: () => { loadFriends(); loadFriendRequests(); },
+      onFriendshipChange: () => {
+        loadFriends();
+        loadFriendRequests();
+      },
       onConversationChange: () => loadConversations(),
+      // 🔥 BARU: terjemahan baru masuk → update bubble
+      onTranslationChange: (payload) => handleIncomingTranslation(payload),
     });
     AppState.subscriptions.push(sub);
   } catch (e) {
@@ -798,18 +758,13 @@ function subscribeToMessages(conversationId) {
 
 async function handleIncomingMessage(msg) {
   if (!msg || !msg.conversation_id) return;
-  // If active conversation, append
   if (AppState.activeConversation?.id === msg.conversation_id) {
-    // Avoid duplicates
     if (AppState.messages.some((m) => m.id === msg.id)) return;
-    // Fetch translation for receiving user's language
     const enriched = await enrichIncomingMessage(msg);
     AppState.messages.push(enriched);
     renderMessages();
-    // Mark read
     markConversationRead(msg.conversation_id);
   }
-  // Update conversation preview
   loadConversations();
 }
 
@@ -819,6 +774,21 @@ async function enrichIncomingMessage(msg) {
     if (full) return full;
   } catch (e) { /* ignore */ }
   return { ...msg, translation: null, translation_status: 'pending' };
+}
+
+async function handleIncomingTranslation(payload) {
+  const row = payload?.new;
+  if (!row || !row.message_id) return;
+  if (row.target_language !== AppState.profile.language) return;
+  const idx = AppState.messages.findIndex((m) => m.id === row.message_id);
+  if (idx < 0) return;
+  AppState.messages[idx].translation = {
+    target_language: row.target_language,
+    translated_text: row.translated_text,
+  };
+  AppState.messages[idx].reading_guide = row.reading_guide || null;
+  AppState.messages[idx].translation_status = 'done';
+  renderMessages();
 }
 
 async function markConversationRead(conversationId) {
@@ -942,11 +912,16 @@ async function saveSettings() {
       avatar_url: avatar || null,
       language: lang,
     });
-    AppState.profile = { ...AppState.profile, display_name: name, username, avatar_url: avatar || null, language: lang };
+    AppState.profile = {
+      ...AppState.profile,
+      display_name: name,
+      username,
+      avatar_url: avatar || null,
+      language: lang,
+    };
     renderMe();
     closeSettings();
     showToast('Pengaturan disimpan.', 'success');
-    // Re-translate messages to new language
     if (AppState.activeConversation) {
       await loadMessages(AppState.activeConversation.id);
     }
@@ -967,14 +942,12 @@ function autoResize(textarea) {
  * EVENT BINDINGS
  * ========================================================= */
 document.addEventListener('DOMContentLoaded', () => {
-  // Auth tabs
   $$('.auth-tab').forEach((t) => t.addEventListener('click', () => switchAuthTab(t.dataset.tab)));
   $('#login-form').addEventListener('submit', handleLogin);
   $('#register-form').addEventListener('submit', handleRegister);
   $('#btn-forgot').addEventListener('click', handleForgot);
   $('#btn-google').addEventListener('click', handleGoogle);
 
-  // Sidebar
   $('#btn-logout').addEventListener('click', handleLogout);
   $('#btn-settings').addEventListener('click', openSettings);
   $('#btn-new-chat').addEventListener('click', openSearchModal);
@@ -998,17 +971,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Chat
   $('#btn-chat-back').addEventListener('click', closeChatMobile);
   $('#btn-toggle-layers').addEventListener('click', toggleLayerControls);
-  $('#layer-original').addEventListener('change', (e) => { AppState.layers.original = e.target.checked; renderMessages(); });
-  $('#layer-reading').addEventListener('change', (e) => { AppState.layers.reading = e.target.checked; renderMessages(); });
-  $('#layer-translation').addEventListener('change', (e) => { AppState.layers.translation = e.target.checked; renderMessages(); });
+  $('#layer-original').addEventListener('change', (e) => {
+    AppState.layers.original = e.target.checked;
+    renderMessages();
+  });
+  $('#layer-reading').addEventListener('change', (e) => {
+    AppState.layers.reading = e.target.checked;
+    renderMessages();
+  });
+  $('#layer-translation').addEventListener('change', (e) => {
+    AppState.layers.translation = e.target.checked;
+    renderMessages();
+  });
 
-  // Composer
   const composer = $('#composer');
   const input = $('#composer-input');
-  composer.addEventListener('submit', (e) => { e.preventDefault(); sendMessage(); });
+  composer.addEventListener('submit', (e) => {
+    e.preventDefault();
+    sendMessage();
+  });
   input.addEventListener('input', () => autoResize(input));
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1017,11 +1000,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Settings modal
   $('#btn-close-settings').addEventListener('click', closeSettings);
   $('#btn-save-settings').addEventListener('click', saveSettings);
 
-  // Search modal
   $('#btn-close-search').addEventListener('click', closeSearchModal);
   $('#modal-search-input').addEventListener('input', (e) => {
     clearTimeout(searchDebounce);
@@ -1029,13 +1010,11 @@ document.addEventListener('DOMContentLoaded', () => {
     searchDebounce = setTimeout(() => performUserSearch(q), 350);
   });
 
-  // Close modals on backdrop click
   $$('.modal').forEach((m) => {
     m.addEventListener('click', (e) => {
       if (e.target === m) m.classList.add('hidden');
     });
   });
 
-  // Start
   init();
 });
