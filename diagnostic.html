@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0e14" />
+<title>PIYE Diagnostic</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0a0e14;
+    color: #e8eef7;
+    padding: 16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; color: #00d4ff; }
+  .subtitle { font-size: 12px; color: #7d8aa0; margin-bottom: 16px; }
+  .card {
+    background: #111823;
+    border: 1px solid #1f2b3d;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .card h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #7d8aa0;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 700;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .badge.ok { background: #1a3d2a; color: #2fd27a; border: 1px solid #2fd27a; }
+  .badge.fail { background: #3d1a24; color: #ff5470; border: 1px solid #ff5470; }
+  .badge.warn { background: #3d361a; color: #ffd24a; border: 1px solid #ffd24a; }
+  .badge.run { background: #1a2d3d; color: #00d4ff; border: 1px solid #00d4ff; }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid #1f2b3d;
+    font-size: 13px;
+  }
+  .row:last-child { border-bottom: none; }
+  .row .label { color: #7d8aa0; flex-shrink: 0; }
+  .row .val {
+    text-align: right;
+    word-break: break-all;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    color: #e8eef7;
+  }
+  .val.ok { color: #2fd27a; }
+  .val.fail { color: #ff5470; }
+  pre {
+    background: #17202e;
+    border: 1px solid #1f2b3d;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 11px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: #b8c5d6;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .btn {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, #00d4ff, #0088cc);
+    color: #04121a;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-bottom: 12px;
+  }
+  .btn:active { opacity: 0.8; }
+  .btn:disabled { opacity: 0.5; }
+  .input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .input-row input {
+    flex: 1;
+    padding: 10px 12px;
+    background: #17202e;
+    border: 1px solid #1f2b3d;
+    border-radius: 8px;
+    color: #e8eef7;
+    font-size: 14px;
+  }
+  .input-row button {
+    padding: 10px 16px;
+    background: #00d4ff;
+    color: #04121a;
+    border: none;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #1f2b3d;
+    border-top-color: #00d4ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+
+<h1>PIYE Diagnostic</h1>
+<div class="subtitle">Tes koneksi Supabase & kamus lokal</div>
+
+<button class="btn" id="run-all">▶ Jalankan Semua Tes</button>
+
+<!-- CARD 1: Config & Auth -->
+<div class="card">
+  <h2>1. Config & Auth <span class="badge" id="badge-config">menunggu</span></h2>
+  <div id="result-config">
+    <div class="row"><span class="label">Status</span><span class="val">-</span></div>
+  </div>
+</div>
+
+<!-- CARD 2: Tabel Kamus -->
+<div class="card">
+  <h2>2. Tabel Kamus <span class="badge" id="badge-dict">menunggu</span></h2>
+  <div id="result-dict">
+    <div class="row"><span class="label">Status</span><span class="val">-</span></div>
+  </div>
+</div>
+
+<!-- CARD 3: Sample Data Kamus -->
+<div class="card">
+  <h2>3. Sample Data <span class="badge" id="badge-sample">menunggu</span></h2>
+  <div id="result-sample">
+    <div class="row"><span class="label">Status</span><span class="val">-</span></div>
+  </div>
+</div>
+
+<!-- CARD 4: Lookup Test -->
+<div class="card">
+  <h2>4. Lookup Test <span class="badge" id="badge-lookup">menunggu</span></h2>
+  <div class="input-row">
+    <input id="lookup-input" type="text" placeholder="ketik kata (mis. hello)" value="hello" />
+    <button id="lookup-btn">Cek</button>
+  </div>
+  <div id="result-lookup">
+    <div class="row"><span class="label">Status</span><span class="val">-</span></div>
+  </div>
+</div>
+
+<!-- CARD 5: Translate Function -->
+<div class="card">
+  <h2>5. translateMessage() <span class="badge" id="badge-translate">menunggu</span></h2>
+  <div id="result-translate">
+    <div class="row"><span class="label">Status</span><span class="val">-</span></div>
+  </div>
+</div>
+
+<!-- CARD 6: Realtime -->
+<div class="card">
+  <h2>6. Realtime Tables <span class="badge" id="badge-realtime">menunggu</span></h2>
+  <div id="result-realtime">
+    <div class="row"><span class="label">Status</span><span class="val">-</span></div>
+  </div>
+</div>
+
+<!-- CARD 7: Raw Log -->
+<div class="card">
+  <h2>7. Log Lengkap</h2>
+  <pre id="log-box">(belum ada log)</pre>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+'use strict';
+
+const CFG = {
+  URL: 'https://ovxmajovtrruojcnxbyr.supabase.co',
+  KEY: 'sb_publishable_06a469aYdOfwAoHaMfE_1g_6bSaVn4t',
+  DICT_EN_ID: 'data_en_id',
+  DICT_ID_EN: 'data_id_en',
+  // Kalau nama kolom beda, ganti di sini aja (untuk diagnostic)
+  COL_WORD: 'word',
+  COL_TRANS: 'trans',
+};
+
+const sb = window.supabase.createClient(CFG.URL, CFG.KEY);
+
+const logs = [];
+function log(msg, data) {
+  const t = new Date().toLocaleTimeString();
+  const line = data !== undefined
+    ? `[${t}] ${msg} :: ${JSON.stringify(data)}`
+    : `[${t}] ${msg}`;
+  logs.push(line);
+  document.getElementById('log-box').textContent = logs.slice(-50).join('\n');
+  console.log(msg, data ?? '');
+}
+
+function setCard(cardId, badgeId, badgeState, badgeText, html) {
+  document.getElementById(badgeId).className = 'badge ' + badgeState;
+  document.getElementById(badgeId).textContent = badgeText;
+  document.getElementById(cardId).innerHTML = html;
+}
+
+function row(label, value, ok) {
+  const cls = ok === true ? 'ok' : ok === false ? 'fail' : '';
+  return `<div class="row"><span class="label">${label}</span><span class="val ${cls}">${value}</span></div>`;
+}
+
+/* =========================================================
+ * TES 1: CONFIG & AUTH
+ * ========================================================= */
+async function testConfig() {
+  try {
+    log('testConfig start');
+    const { data: sess, error } = await sb.auth.getSession();
+    if (error) throw error;
+    const userId = sess?.session?.user?.id;
+    const userEmail = sess?.session?.user?.email;
+
+    const html = [
+      row('Supabase URL', CFG.URL.replace('https://', '').split('.')[0] + '...', true),
+      row('Anon key', CFG.KEY.slice(0, 20) + '...', true),
+      row('SDK loaded', typeof window.supabase !== 'undefined' ? 'YES' : 'NO', !!window.supabase),
+      row('Session', userId ? 'logged in' : 'no session', !!userId),
+      userId ? row('User ID', userId.slice(0, 8) + '...', true) : '',
+      userEmail ? row('Email', userEmail, true) : '',
+    ].join('');
+
+    setCard('result-config', 'badge-config', 'ok', 'OK', html);
+    log('testConfig ok', { userId, userEmail });
+    return true;
+  } catch (e) {
+    setCard('result-config', 'badge-config', 'fail', 'ERROR',
+      row('Error', e.message || String(e), false));
+    log('testConfig FAIL', e.message);
+    return false;
+  }
+}
+
+/* =========================================================
+ * TES 2: TABEL KAMUS ADA & BISA DIBACA
+ * ========================================================= */
+async function testDict() {
+  try {
+    log('testDict start');
+
+    const enId = await sb.from(CFG.DICT_EN_ID).select('*', { count: 'exact', head: true });
+    const idEn = await sb.from(CFG.DICT_ID_EN).select('*', { count: 'exact', head: true });
+
+    const html = [
+      row(CFG.DICT_EN_ID + ' exists', enId.error ? 'NO — ' + enId.error.message : 'YES', !enId.error),
+      enId.error ? '' : row(CFG.DICT_EN_ID + ' count', enId.count ?? '?', enId.count > 0),
+      row(CFG.DICT_ID_EN + ' exists', idEn.error ? 'NO — ' + idEn.error.message : 'YES', !idEn.error),
+      idEn.error ? '' : row(CFG.DICT_ID_EN + ' count', idEn.count ?? '?', idEn.count > 0),
+    ].join('');
+
+    const ok = !enId.error && !idEn.error && (enId.count > 0) && (idEn.count > 0);
+    setCard('result-dict', 'badge-dict', ok ? 'ok' : 'fail', ok ? 'OK' : 'MASALAH', html);
+    log('testDict', { enIdCount: enId.count, idEnCount: idEn.count, enErr: enId.error?.message, idErr: idEn.error?.message });
+    return ok;
+  } catch (e) {
+    setCard('result-dict', 'badge-dict', 'fail', 'ERROR',
+      row('Error', e.message || String(e), false));
+    log('testDict FAIL', e.message);
+    return false;
+  }
+}
+
+/* =========================================================
+ * TES 3: SAMPLE DATA & STRUKTUR KOLOM
+ * ========================================================= */
+async function testSample() {
+  try {
+    log('testSample start');
+
+    const { data: enSample, error: enErr } = await sb
+      .from(CFG.DICT_EN_ID)
+      .select('*')
+      .limit(5);
+    if (enErr) throw new Error('data_en_id: ' + enErr.message);
+
+    const { data: idSample, error: idErr } = await sb
+      .from(CFG.DICT_ID_EN)
+      .select('*')
+      .limit(5);
+    if (idErr) throw new Error('data_id_en: ' + idErr.message);
+
+    // Deteksi nama kolom dari baris pertama
+    const enCols = enSample && enSample[0] ? Object.keys(enSample[0]) : [];
+    const idCols = idSample && idSample[0] ? Object.keys(idSample[0]) : [];
+
+    // Cek apakah kolom 'word' & 'trans' ada
+    const hasWordTransEn = enCols.includes('word') && enCols.includes('trans');
+    const hasWordTransId = idCols.includes('word') && idCols.includes('trans');
+
+    const html = [
+      row('Kolom ' + CFG.DICT_EN_ID, enCols.join(', ') || '(kosong)', hasWordTransEn),
+      row('Kolom ' + CFG.DICT_ID_EN, idCols.join(', ') || '(kosong)', hasWordTransId),
+      '<div style="margin-top:10px"><div class="label" style="color:#7d8aa0;font-size:12px;margin-bottom:4px">Sample data_en_id:</div>',
+      `<pre>${JSON.stringify(enSample, null, 2)}</pre></div>`,
+      '<div style="margin-top:10px"><div class="label" style="color:#7d8aa0;font-size:12px;margin-bottom:4px">Sample data_id_en:</div>',
+      `<pre>${JSON.stringify(idSample, null, 2)}</pre></div>`,
+    ].join('');
+
+    const ok = hasWordTransEn && hasWordTransId;
+    setCard('result-sample', 'badge-sample', ok ? 'ok' : 'warn', ok ? 'OK' : 'CEK KOLOM', html);
+    log('testSample', { enCols, idCols, hasWordTransEn, hasWordTransId });
+    return ok;
+  } catch (e) {
+    setCard('result-sample', 'badge-sample', 'fail', 'ERROR',
+      row('Error', e.message || String(e), false));
+    log('testSample FAIL', e.message);
+    return false;
+  }
+}
+
+/* =========================================================
+ * TES 4: LOOKUP MANUAL (kata custom)
+ * ========================================================= */
+async function testLookup(word) {
+  try {
+    const q = (word || '').trim().toLowerCase();
+    if (!q) throw new Error('Kata kosong');
+    log('testLookup', q);
+
+    // Query EN→ID
+    const enRes = await sb.from(CFG.DICT_EN_ID)
+      .select(`${CFG.COL_WORD}, ${CFG.COL_TRANS}`)
+      .ilike(CFG.COL_WORD, q)
+      .limit(3);
+
+    // Query ID→EN
+    const idRes = await sb.from(CFG.DICT_ID_EN)
+      .select(`${CFG.COL_WORD}, ${CFG.COL_TRANS}`)
+      .ilike(CFG.COL_WORD, q)
+      .limit(3);
+
+    // Query wildcard (kalau exact gagal)
+    const enWild = await sb.from(CFG.DICT_EN_ID)
+      .select(`${CFG.COL_WORD}, ${CFG.COL_TRANS}`)
+      .ilike(CFG.COL_WORD, `%${q}%`)
+      .limit(5);
+
+    const html = [
+      row('Query', q, null),
+      row('EN→ID exact', enRes.error ? 'ERR: ' + enRes.error.message : `${enRes.data?.length || 0} hit`, !enRes.error && enRes.data?.length > 0),
+      enRes.data?.length ? `<pre>${JSON.stringify(enRes.data, null, 2)}</pre>` : '',
+      row('ID→EN exact', idRes.error ? 'ERR: ' + idRes.error.message : `${idRes.data?.length || 0} hit`, !idRes.error && idRes.data?.length > 0),
+      idRes.data?.length ? `<pre>${JSON.stringify(idRes.data, null, 2)}</pre>` : '',
+      row('EN→ID wildcard', enWild.error ? 'ERR: ' + enWild.error.message : `${enWild.data?.length || 0} hit`, !enWild.error && enWild.data?.length > 0),
+      enWild.data?.length ? `<pre>${JSON.stringify(enWild.data, null, 2)}</pre>` : '',
+    ].join('');
+
+    const ok = (enRes.data?.length > 0) || (idRes.data?.length > 0) || (enWild.data?.length > 0);
+    setCard('result-lookup', 'badge-lookup', ok ? 'ok' : 'fail', ok ? 'KETEMU' : 'GAK KETEMU', html);
+    log('testLookup result', { enHits: enRes.data?.length, idHits: idRes.data?.length, wildHits: enWild.data?.length });
+    return ok;
+  } catch (e) {
+    setCard('result-lookup', 'badge-lookup', 'fail', 'ERROR',
+      row('Error', e.message || String(e), false));
+    log('testLookup FAIL', e.message);
+    return false;
+  }
+}
+
+/* =========================================================
+ * TES 5: TRANSLATE MESSAGE (FULL PIPELINE)
+ * ========================================================= */
+async function testTranslate() {
+  try {
+    log('testTranslate start');
+
+    // Tes 3 arah
+    const cases = [
+      { text: 'hello', src: 'en', tgt: 'id' },
+      { text: 'halo', src: 'id', tgt: 'en' },
+      { text: 'thank you', src: 'en', tgt: 'id' },
+    ];
+
+    const results = [];
+    for (const c of cases) {
+      try {
+        const localRes = await sb.from(CFG.DICT_EN_ID)
+          .select(`${CFG.COL_WORD}, ${CFG.COL_TRANS}`)
+          .ilike(CFG.COL_WORD, c.text.toLowerCase())
+          .limit(1);
+
+        const hit = localRes.data?.[0];
+        results.push({
+          ...c,
+          dictHit: hit ? hit[CFG.COL_TRANS] : null,
+          err: localRes.error?.message,
+        });
+      } catch (e) {
+        results.push({ ...c, err: e.message });
+      }
+    }
+
+    const html = results.map((r) =>
+      row(`${r.src}→${r.tgt} "${r.text}"`,
+        r.err ? 'ERR: ' + r.err : (r.dictHit ? `→ "${r.dictHit}"` : '→ (tidak di kamus)'),
+        r.err ? false : r.dictHit ? true : null)
+    ).join('');
+
+    const anyHit = results.some(r => r.dictHit);
+    setCard('result-translate', 'badge-translate',
+      anyHit ? 'ok' : 'warn',
+      anyHit ? 'ADA YANG HIT' : 'SEMUA MISS',
+      html + `<div style="margin-top:10px;font-size:11px;color:#7d8aa0">Kalau semua "tidak di kamus", berarti kamus lo gak punya kata-kata basic ini. Cek sample di card 3.</div>`);
+    log('testTranslate done', results);
+    return anyHit;
+  } catch (e) {
+    setCard('result-translate', 'badge-translate', 'fail', 'ERROR',
+      row('Error', e.message || String(e), false));
+    log('testTranslate FAIL', e.message);
+    return false;
+  }
+}
+
+/* =========================================================
+ * TES 6: REALTIME STATUS
+ * ========================================================= */
+async function testRealtime() {
+  try {
+    log('testRealtime start');
+
+    // Cek via pg_publication_tables (butuh RPC, fallback: cek subscribe)
+    const tables = ['messages', 'message_translations', 'profiles', 'conversation_members', 'friendships'];
+    const results = {};
+
+    // Gak bisa cek status realtime langsung dari client tanpa RPC.
+    // Tapi kita bisa cek apakah tabel-tabel ada.
+    for (const t of tables) {
+      try {
+        const { error } = await sb.from(t).select('*', { head: true, count: 'exact' }).limit(1);
+        results[t] = error ? 'ERR' : 'ADA';
+      } catch (e) {
+        results[t] = 'ERR';
+      }
+    }
+
+    const html = Object.entries(results).map(([t, s]) =>
+      row(t, s, s === 'ADA')
+    ).join('') + `<div style="margin-top:10px;font-size:11px;color:#7d8aa0">
+      ⚠️ Status realtime (publication) tidak bisa dicek dari client.<br>
+      Cek manual di Supabase Dashboard → Database → Replication.<br>
+      Pastikan <b>message_translations</b> & <b>profiles</b> enabled.
+    </div>`;
+
+    const ok = Object.values(results).every(r => r === 'ADA');
+    setCard('result-realtime', 'badge-realtime', ok ? 'ok' : 'warn', ok ? 'TABEL OK' : 'CEK', html);
+    log('testRealtime done', results);
+    return ok;
+  } catch (e) {
+    setCard('result-realtime', 'badge-realtime', 'fail', 'ERROR',
+      row('Error', e.message || String(e), false));
+    log('testRealtime FAIL', e.message);
+    return false;
+  }
+}
+
+/* =========================================================
+ * RUN ALL
+ * ========================================================= */
+async function runAll() {
+  const btn = document.getElementById('run-all');
+  btn.disabled = true;
+  btn.textContent = '⏳ Menjalankan...';
+
+  logs.length = 0;
+  document.getElementById('log-box').textContent = '(mulai...)';
+
+  await testConfig();
+  await testDict();
+  await testSample();
+  await testLookup('hello');
+  await testTranslate();
+  await testRealtime();
+
+  btn.disabled = false;
+  btn.textContent = '▶ Jalankan Ulang';
+  log('════ SELESAI ════');
+}
+
+document.getElementById('run-all').addEventListener('click', runAll);
+
+document.getElementById('lookup-btn').addEventListener('click', () => {
+  const w = document.getElementById('lookup-input').value;
+  testLookup(w);
+});
+
+document.getElementById('lookup-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    testLookup(e.target.value);
+  }
+});
+
+// Auto-run saat buka
+window.addEventListener('load', () => {
+  setTimeout(runAll, 500);
+});
+</script>
+</body>
+</html>
