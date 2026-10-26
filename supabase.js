@@ -1,28 +1,23 @@
 /**
- * PIYE — supabase.js
- * Inisialisasi Supabase, autentikasi, database, realtime, dan adapter translation.
- *
- * KONFIGURASI:
- *   1. Ganti SUPABASE_URL dan SUPABASE_ANON_KEY di bawah.
- *   2. Jangan gunakan service_role key di frontend.
- *   3. Translation provider: secara default PIYE memakai MyMemory API publik
- *      (tanpa API key). Untuk produksi, arahkan ke Supabase Edge Function.
- *      Lihat `PIYE_CONFIG.translateEndpoint` dan `readingGuideEndpoint`.
+ * PIYE — supabase.js (RECODED)
+ * Integrasi kamus lokal data_en_id & data_id_en sebagai prioritas terjemahan.
+ * Fallback ke Edge Function / MyMemory kalau kamus gak punya.
  */
 
 'use strict';
 
 const PIYE_CONFIG = {
-  SUPABASE_URL: 'https://ovxmajovtrruojcnxbyr.supabase.co', // URL project lu
-  SUPABASE_ANON_KEY: 'sb_publishable_06a469aYdOfwAoHaMfE_1g_6bSaVn4t', // Publishable key lu
-
-  // Endpoint terjemahan.
-  // Kosongkan ('') untuk memakai MyMemory API langsung (publik, rate-limited).
-  // Isi dengan URL Supabase Edge Function untuk produksi:
-  //   https://<project>.supabase.co/functions/v1/translate
+  SUPABASE_URL: 'https://ovxmajovtrruojcnxbyr.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_06a469aYdOfwAoHaMfE_1g_6bSaVn4t',
   translateEndpoint: '',
-  // Endpoint reading guide. Kosong = fallback lokal (karakter CJK/Arab dasar).
   readingGuideEndpoint: '',
+  // Nama tabel kamus — sesuaikan kalau beda
+  DICT_EN_ID: 'data_en_id',
+  DICT_ID_EN: 'data_id_en',
+  // Nama kolom kamus — SESUAIKAN dengan struktur tabel lo
+  // Default gue pake: english, indonesia
+  DICT_EN_ID_COLS: { source: 'english', target: 'indonesia' },
+  DICT_ID_EN_COLS: { source: 'indonesia', target: 'english' },
 };
 
 /* =========================================================
@@ -61,7 +56,6 @@ const LANGUAGES = [
 let supabaseClient = null;
 let configured = false;
 
-// FIX: Panggil initClient() agar status dicek saat runtime, bukan hanya baca variabel
 function isConfigured() {
   return !!initClient();
 }
@@ -83,9 +77,6 @@ function initClient() {
   return supabaseClient;
 }
 
-/* =========================================================
- * HELPERS
- * ========================================================= */
 function client() {
   const c = initClient();
   if (!c) throw new Error('Supabase belum dikonfigurasi. Isi SUPABASE_URL dan SUPABASE_ANON_KEY di supabase.js.');
@@ -109,7 +100,6 @@ async function signUp(email, password, meta) {
     options: { data: { display_name: meta.displayName, username: meta.username, language: meta.language } },
   });
   if (error) throw error;
-  // The DB trigger `handle_new_user` creates the profile row from metadata.
   return data;
 }
 
@@ -121,10 +111,7 @@ async function signInWithPassword(email, password) {
 
 async function signInWithGoogle() {
   const redirectTo = `${window.location.origin}${window.location.pathname}`;
-  const { data, error } = await client().auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo },
-  });
+  const { data, error } = await client().auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
   if (error) throw error;
   return data;
 }
@@ -268,96 +255,53 @@ async function getFriendRequests() {
 /* =========================================================
  * CONVERSATIONS
  * ========================================================= */
-
 async function getOrCreateConversation(peerId) {
   const db = client();
-
-  // 1. Pastikan user sudah login
-  const { data: sess, error: sessionError } =
-    await db.auth.getSession();
-
+  const { data: sess, error: sessionError } = await db.auth.getSession();
   if (sessionError) throw sessionError;
-
   const uid = sess?.session?.user?.id;
+  if (!uid) throw new Error('Lu harus login dulu.');
+  if (!peerId || peerId === uid) throw new Error('User tujuan chat tidak valid.');
 
-  if (!uid) {
-    throw new Error("Lu harus login dulu.");
-  }
-
-  if (!peerId || peerId === uid) {
-    throw new Error("User tujuan chat tidak valid.");
-  }
-
-  // 2. Cari percakapan milik user yang sedang login
   const { data: mine, error: e1 } = await db
-    .from("conversation_members")
-    .select("conversation_id")
-    .eq("user_id", uid);
-
+    .from('conversation_members')
+    .select('conversation_id')
+    .eq('user_id', uid);
   if (e1) throw e1;
+  const convIds = (mine || []).map((m) => m.conversation_id);
 
-  const convIds = (mine || []).map(
-    (m) => m.conversation_id
-  );
-
-  // 3. Periksa apakah sudah ada percakapan bersama
   if (convIds.length > 0) {
     const { data: peerRows, error: e2 } = await db
-      .from("conversation_members")
-      .select("conversation_id")
-      .eq("user_id", peerId)
-      .in("conversation_id", convIds);
-
+      .from('conversation_members')
+      .select('conversation_id')
+      .eq('user_id', peerId)
+      .in('conversation_id', convIds);
     if (e2) throw e2;
-
-    if (peerRows?.length > 0) {
-      return { id: peerRows[0].conversation_id };
-    }
+    if (peerRows?.length > 0) return { id: peerRows[0].conversation_id };
   }
 
-  // 4. Buat ID percakapan di sisi browser
   const conversationId = crypto.randomUUID();
-
-  // Jangan pakai .select() di sini.
-  // User belum menjadi anggota percakapan,
-  // sehingga policy SELECT bisa menolak hasilnya.
-  const { error: e3 } = await db
-    .from("conversations")
-    .insert({
-      id: conversationId
-    });
-
+  const { error: e3 } = await db.from('conversations').insert({ id: conversationId });
   if (e3) throw e3;
 
-  // 5. Masukkan user yang login terlebih dahulu
-  const { error: e4 } = await db
-    .from("conversation_members")
-    .insert({
-      conversation_id: conversationId,
-      user_id: uid
-    });
-
+  const { error: e4 } = await db.from('conversation_members').insert({
+    conversation_id: conversationId,
+    user_id: uid,
+  });
   if (e4) throw e4;
 
-  // 6. Setelah itu, masukkan user tujuan
-  const { error: e5 } = await db
-    .from("conversation_members")
-    .insert({
-      conversation_id: conversationId,
-      user_id: peerId
-    });
-
+  const { error: e5 } = await db.from('conversation_members').insert({
+    conversation_id: conversationId,
+    user_id: peerId,
+  });
   if (e5) throw e5;
 
-  // 7. Kembalikan ID agar bisa dipakai membuka chat
   return { id: conversationId };
 }
-
 
 async function getConversations() {
   const { data: sess } = await client().auth.getSession();
   const uid = sess.session.user.id;
-
   const { data: memberships, error } = await client()
     .from('conversation_members')
     .select('conversation_id')
@@ -366,7 +310,6 @@ async function getConversations() {
   const convIds = (memberships || []).map((m) => m.conversation_id);
   if (!convIds.length) return [];
 
-  // Get peer members
   const { data: peerMembers, error: e2 } = await client()
     .from('conversation_members')
     .select('conversation_id, user_id')
@@ -381,7 +324,6 @@ async function getConversations() {
     .in('id', peerIds.length ? peerIds : ['00000000-0000-0000-0000-000000000000']);
   const profileMap = Object.fromEntries((profiles || []).map((p) => [p.id, p]));
 
-  // Last messages
   const { data: lastMsgs } = await client()
     .from('messages')
     .select('conversation_id, original_text, created_at')
@@ -392,21 +334,23 @@ async function getConversations() {
     if (!lastMap[m.conversation_id]) lastMap[m.conversation_id] = m;
   });
 
-  return convIds.map((id) => {
-    const peerRow = (peerMembers || []).find((p) => p.conversation_id === id);
-    const peer = peerRow ? profileMap[peerRow.user_id] : null;
-    const last = lastMap[id];
-    return {
-      id,
-      peer,
-      last_message_preview: last ? last.original_text.slice(0, 80) : '',
-      last_message_at: last?.created_at || null,
-    };
-  }).sort((a, b) => {
-    const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
-    const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
-    return tb - ta;
-  });
+  return convIds
+    .map((id) => {
+      const peerRow = (peerMembers || []).find((p) => p.conversation_id === id);
+      const peer = peerRow ? profileMap[peerRow.user_id] : null;
+      const last = lastMap[id];
+      return {
+        id,
+        peer,
+        last_message_preview: last ? last.original_text.slice(0, 80) : '',
+        last_message_at: last?.created_at || null,
+      };
+    })
+    .sort((a, b) => {
+      const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+      const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      return tb - ta;
+    });
 }
 
 /* =========================================================
@@ -455,7 +399,7 @@ async function getMessages(conversationId, targetLanguage) {
       ...m,
       translation: t ? { target_language: t.target_language, translated_text: t.translated_text } : null,
       reading_guide: t?.reading_guide || null,
-      translation_status: t ? 'done' : (m.source_language === targetLanguage ? 'same' : 'unavailable'),
+      translation_status: t ? 'done' : m.source_language === targetLanguage ? 'same' : 'unavailable',
     };
   });
 }
@@ -481,24 +425,26 @@ async function getMessageWithTranslation(messageId, targetLanguage) {
   };
 }
 
-async function saveTranslation(messageId, targetLanguage, translatedText, readingGuide, sourceLanguage) {
+async function saveTranslation(messageId, targetLanguage, translatedText, readingGuide, sourceLanguage, provider) {
   const { error } = await client()
     .from('message_translations')
-    .upsert({
-      message_id: messageId,
-      target_language: targetLanguage,
-      translated_text: translatedText,
-      reading_guide: readingGuide,
-      source_language: sourceLanguage,
-      provider: 'mymemory+heuristic',
-    }, { onConflict: 'message_id,target_language' });
+    .upsert(
+      {
+        message_id: messageId,
+        target_language: targetLanguage,
+        translated_text: translatedText,
+        reading_guide: readingGuide,
+        source_language: sourceLanguage,
+        provider: provider || 'local-dict',
+      },
+      { onConflict: 'message_id,target_language' }
+    );
   if (error) throw error;
 }
 
 async function markConversationRead(conversationId) {
   const { data: sess } = await client().auth.getSession();
   const uid = sess.session.user.id;
-  // Insert read receipts for messages not sent by me
   const { data: msgs } = await client()
     .from('messages')
     .select('id')
@@ -520,15 +466,17 @@ let realtimeChannels = [];
 function subscribeToConversationMessages(conversationId, onNew) {
   const ch = client()
     .channel('conv-' + conversationId)
-    .on('postgres_changes',
+    .on(
+      'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
-      (payload) => onNew(payload.new))
+      (payload) => onNew(payload.new)
+    )
     .subscribe();
   realtimeChannels.push(ch);
   return ch;
 }
 
-function subscribeToUserChannels({ onNewMessage, onReadReceipt, onFriendRequest, onFriendshipChange, onConversationChange }) {
+function subscribeToUserChannels({ onNewMessage, onReadReceipt, onFriendRequest, onFriendshipChange, onConversationChange, onTranslationChange }) {
   const ch = client().channel('user-events');
 
   if (onNewMessage) {
@@ -536,6 +484,9 @@ function subscribeToUserChannels({ onNewMessage, onReadReceipt, onFriendRequest,
   }
   if (onReadReceipt) {
     ch.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_read_receipts' }, (payload) => onReadReceipt(payload.new));
+  }
+  if (onTranslationChange) {
+    ch.on('postgres_changes', { event: '*', schema: 'public', table: 'message_translations' }, (payload) => onTranslationChange(payload));
   }
   if (onFriendRequest || onFriendshipChange) {
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'friendships' }, (payload) => {
@@ -559,46 +510,123 @@ async function unsubscribeAll() {
 }
 
 /* =========================================================
- * TRANSLATION & READING GUIDE
+ * LOCAL DICTIONARY (data_en_id & data_id_en)
  * ========================================================= */
+const dictCache = new Map(); // `${src}|${tgt}|${norm}` -> { text, provider }
 
-// Cache terjemahan in-memory untuk mengurangi request berulang dalam sesi.
-const translationCache = new Map(); // key: `${text}|${src}|${tgt}` -> string
+function normalizeText(text) {
+  return String(text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
 
+/**
+ * Cari terjemahan di kamus lokal (hanya en<->id).
+ * Return { text, provider } atau null.
+ */
+async function translateFromLocalDict(text, sourceLanguage, targetLanguage) {
+  const src = String(sourceLanguage || '').toLowerCase();
+  const tgt = String(targetLanguage || '').toLowerCase();
+  const norm = normalizeText(text);
+  if (!norm) return null;
 
-async function translateMessage(text, sourceLanguage, targetLanguage) {
-  if (!text || !text.trim()) return '';
-  if (sourceLanguage === targetLanguage) return text;
+  const isEnId = src === 'en' && tgt === 'id';
+  const isIdEn = src === 'id' && tgt === 'en';
+  if (!isEnId && !isIdEn) return null;
 
-  const key = `${text}|${sourceLanguage}|${targetLanguage}`;
+  const cacheKey = `${src}|${tgt}|${norm}`;
+  if (dictCache.has(cacheKey)) return dictCache.get(cacheKey);
 
-  if (translationCache.has(key)) {
-    return translationCache.get(key);
+  const table = isEnId ? PIYE_CONFIG.DICT_EN_ID : PIYE_CONFIG.DICT_ID_EN;
+  const cols = isEnId ? PIYE_CONFIG.DICT_EN_ID_COLS : PIYE_CONFIG.DICT_ID_EN_COLS;
+
+  // 1) Exact match (case-insensitive)
+  try {
+    const { data, error } = await client()
+      .from(table)
+      .select(cols.target)
+      .ilike(cols.source, norm)
+      .limit(1);
+    if (!error && data && data.length && data[0][cols.target]) {
+      const out = { text: String(data[0][cols.target]).trim(), provider: 'local-dict' };
+      dictCache.set(cacheKey, out);
+      return out;
+    }
+  } catch (e) {
+    console.warn('dict exact match error', e);
   }
 
-  // 1. Coba Edge Function jika dikonfigurasi
+  // 2) Multi-word: translate per word, minimal 50% match
+  const words = norm.split(' ').filter(Boolean);
+  if (words.length > 1) {
+    const translated = [];
+    let found = 0;
+    for (const w of words) {
+      try {
+        const { data, error } = await client()
+          .from(table)
+          .select(cols.target)
+          .ilike(cols.source, w)
+          .limit(1);
+        if (!error && data && data.length && data[0][cols.target]) {
+          translated.push(String(data[0][cols.target]).trim());
+          found++;
+        } else {
+          translated.push(w);
+        }
+      } catch (e) {
+        translated.push(w);
+      }
+    }
+    if (found >= Math.ceil(words.length * 0.5)) {
+      const out = { text: translated.join(' '), provider: 'local-dict-partial' };
+      dictCache.set(cacheKey, out);
+      return out;
+    }
+  }
+
+  return null;
+}
+
+/* =========================================================
+ * TRANSLATION (LOCAL DICT → EDGE FN → MYMEMORY)
+ * ========================================================= */
+const translationCache = new Map(); // `${text}|${src}|${tgt}` -> { text, provider }
+
+async function translateMessage(text, sourceLanguage, targetLanguage) {
+  if (!text || !text.trim()) return { text: '', provider: 'none' };
+  if (sourceLanguage === targetLanguage) return { text, provider: 'same' };
+
+  const key = `${text}|${sourceLanguage}|${targetLanguage}`;
+  if (translationCache.has(key)) return translationCache.get(key);
+
+  // 🟢 PRIORITAS 1: Kamus lokal
+  try {
+    const local = await translateFromLocalDict(text, sourceLanguage, targetLanguage);
+    if (local && local.text) {
+      translationCache.set(key, local);
+      return local;
+    }
+  } catch (e) {
+    console.warn('local dict lookup failed', e);
+  }
+
+  // 🟡 PRIORITAS 2: Edge Function
   if (PIYE_CONFIG.translateEndpoint) {
     try {
       const res = await fetch(PIYE_CONFIG.translateEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          source: sourceLanguage,
-          target: targetLanguage
-        }),
+        body: JSON.stringify({ text, source: sourceLanguage, target: targetLanguage }),
       });
-
       if (res.ok) {
         const json = await res.json();
-        const out =
-          json.translated_text ||
-          json.translation ||
-          json.text;
-
+        const out = json.translated_text || json.translation || json.text;
         if (typeof out === 'string' && out.trim()) {
-          translationCache.set(key, out);
-          return out;
+          const result = { text: out, provider: 'edge-function' };
+          translationCache.set(key, result);
+          return result;
         }
       }
     } catch (e) {
@@ -606,30 +634,20 @@ async function translateMessage(text, sourceLanguage, targetLanguage) {
     }
   }
 
-  // 2. Fallback ke MyMemory
+  // 🔵 PRIORITAS 3: MyMemory fallback
   try {
     const url =
       `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}` +
       `&langpair=${encodeURIComponent(sourceLanguage)}|${encodeURIComponent(targetLanguage)}`;
-
     const res = await fetch(url);
-
-    if (!res.ok) {
-      throw new Error('Translation request failed: ' + res.status);
-    }
-
+    if (!res.ok) throw new Error('Translation request failed: ' + res.status);
     const json = await res.json();
     const out = json?.responseData?.translatedText;
-
-    if (
-      typeof out === 'string' &&
-      out.trim() &&
-      !/MYMEMORY WARNING/i.test(out)
-    ) {
-      translationCache.set(key, out);
-      return out;
+    if (typeof out === 'string' && out.trim() && !/MYMEMORY WARNING/i.test(out)) {
+      const result = { text: out, provider: 'mymemory' };
+      translationCache.set(key, result);
+      return result;
     }
-
     throw new Error('Translation tidak tersedia dari provider.');
   } catch (e) {
     console.warn('translateMessage error:', e);
@@ -637,14 +655,10 @@ async function translateMessage(text, sourceLanguage, targetLanguage) {
   }
 }
 
-
-// Reading guide sederhana untuk beberapa skrip.
-// Untuk produksi, gunakan Edge Function dengan library khusus (pinyin, kuroshiro, dll).
 async function generateReadingGuide(text, sourceLanguage) {
   if (!text) return null;
   const lang = (sourceLanguage || '').toLowerCase();
 
-  // Edge function override
   if (PIYE_CONFIG.readingGuideEndpoint) {
     try {
       const res = await fetch(PIYE_CONFIG.readingGuideEndpoint, {
@@ -659,18 +673,13 @@ async function generateReadingGuide(text, sourceLanguage) {
     } catch (e) { /* ignore */ }
   }
 
-  // Fallback: hanya untuk skrip yang dikenal
   if (['zh', 'ja', 'ko', 'ar'].includes(lang) && /[\u3000-\u9fff\uac00-\ud7af\u0600-\u06ff]/.test(text)) {
-    // Catatan: tanpa library, kita tidak dapat menghasilkan romanisasi akurat.
-    // Kembalikan null agar lapisan disembunyikan, atau string info.
-    // Untuk demo fungsional, kita tandai sebagai tidak tersedia.
     return null;
   }
   return null;
 }
 
 async function detectLanguage(text) {
-  // Deteksi sederhana berbasis range karakter. Untuk produksi gunakan library/edge function.
   if (!text) return 'id';
   if (/[\u4e00-\u9fff]/.test(text)) return 'zh';
   if (/[\u3040-\u30ff]/.test(text)) return 'ja';
@@ -689,7 +698,6 @@ window.PIYE_API = {
   LANGUAGES,
   isConfigured,
   suggestLanguage,
-  // auth
   signUp,
   signInWithPassword,
   signInWithGoogle,
@@ -697,31 +705,25 @@ window.PIYE_API = {
   resetPassword,
   getSession,
   onAuthChange,
-  // profiles
   getProfile,
   upsertProfile,
   updateProfile,
   isUsernameAvailable,
   searchUsers,
-  // friendships
   sendFriendRequest,
   respondToFriendRequest,
   getFriends,
   getFriendRequests,
-  // conversations
   getOrCreateConversation,
   getConversations,
-  // messages
   sendMessage,
   getMessages,
   getMessageWithTranslation,
   saveTranslation,
   markConversationRead,
-  // realtime
   subscribeToConversationMessages,
   subscribeToUserChannels,
   unsubscribeAll,
-  // translation
   translateMessage,
   generateReadingGuide,
   detectLanguage,
