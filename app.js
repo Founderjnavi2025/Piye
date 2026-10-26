@@ -1,9 +1,8 @@
 /**
- * PIYE — app.js (RECODED)
- * Perubahan utama:
- *  - translateMessage() sekarang return { text, provider }
- *  - Realtime listener untuk message_translations (biar terjemahan muncul realtime)
- *  - Handle update terjemahan yang masuk dari user lain
+ * PIYE — app.js (FINAL)
+ * - Pesan masuk WAJIB di-translate (handleIncomingMessage → tryTranslationForMessage)
+ * - Return { text, provider } dari translateMessage
+ * - Realtime message_translations → bubble auto-update
  */
 
 'use strict';
@@ -736,7 +735,6 @@ function subscribeRealtime() {
         loadFriendRequests();
       },
       onConversationChange: () => loadConversations(),
-      // 🔥 BARU: terjemahan baru masuk → update bubble
       onTranslationChange: (payload) => handleIncomingTranslation(payload),
     });
     AppState.subscriptions.push(sub);
@@ -758,12 +756,30 @@ function subscribeToMessages(conversationId) {
 
 async function handleIncomingMessage(msg) {
   if (!msg || !msg.conversation_id) return;
+
   if (AppState.activeConversation?.id === msg.conversation_id) {
     if (AppState.messages.some((m) => m.id === msg.id)) return;
+
     const enriched = await enrichIncomingMessage(msg);
     AppState.messages.push(enriched);
     renderMessages();
     markConversationRead(msg.conversation_id);
+
+    // ✅ FIX: kalau belum ada terjemahan & beda bahasa → translate sekarang
+    if (
+      enriched.translation_status !== 'done' &&
+      msg.source_language &&
+      msg.source_language !== AppState.profile.language
+    ) {
+      const idx = AppState.messages.findIndex((m) => m.id === msg.id);
+      if (idx >= 0) {
+        AppState.messages[idx].translation_status = 'pending';
+        renderMessages();
+      }
+      tryTranslationForMessage(msg, msg.source_language).catch((e) =>
+        console.warn('incoming translate err', e)
+      );
+    }
   }
   loadConversations();
 }
