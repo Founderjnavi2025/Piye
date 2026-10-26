@@ -1,7 +1,10 @@
 /**
- * PIYE — supabase.js (RECODED)
- * Integrasi kamus lokal data_en_id & data_id_en sebagai prioritas terjemahan.
- * Fallback ke Edge Function / MyMemory kalau kamus gak punya.
+ * PIYE — supabase.js (FINAL)
+ * - Kamus lokal data_en_id & data_id_en (kolom: word, trans) → prioritas 1
+ * - Edge Function → prioritas 2
+ * - MyMemory → prioritas 3
+ * - Exact-match only di kamus (no per-kata ngawur)
+ * - Realtime message_translations aktif
  */
 
 'use strict';
@@ -11,13 +14,11 @@ const PIYE_CONFIG = {
   SUPABASE_ANON_KEY: 'sb_publishable_06a469aYdOfwAoHaMfE_1g_6bSaVn4t',
   translateEndpoint: '',
   readingGuideEndpoint: '',
-  // Nama tabel kamus — sesuaikan kalau beda
   DICT_EN_ID: 'data_en_id',
   DICT_ID_EN: 'data_id_en',
-  // Nama kolom kamus — SESUAIKAN dengan struktur tabel lo
-  // Default gue pake: english, indonesia
-  DICT_EN_ID_COLS: { source: 'english', target: 'indonesia' },
-  DICT_ID_EN_COLS: { source: 'indonesia', target: 'english' },
+  // ✅ FIX: kolom kamus = word & trans
+  DICT_EN_ID_COLS: { source: 'word', target: 'trans' },
+  DICT_ID_EN_COLS: { source: 'word', target: 'trans' },
 };
 
 /* =========================================================
@@ -523,7 +524,9 @@ function normalizeText(text) {
 
 /**
  * Cari terjemahan di kamus lokal (hanya en<->id).
- * Return { text, provider } atau null.
+ * ✅ FIX: EXACT MATCH ONLY (kalimat utuh).
+ * Kalau gak ketemu → return null (biar MyMemory yang nerjemahin kalimat utuh).
+ * Gak ada lagi partial per-kata yang bikin kalimat ngawur.
  */
 async function translateFromLocalDict(text, sourceLanguage, targetLanguage) {
   const src = String(sourceLanguage || '').toLowerCase();
@@ -541,13 +544,13 @@ async function translateFromLocalDict(text, sourceLanguage, targetLanguage) {
   const table = isEnId ? PIYE_CONFIG.DICT_EN_ID : PIYE_CONFIG.DICT_ID_EN;
   const cols = isEnId ? PIYE_CONFIG.DICT_EN_ID_COLS : PIYE_CONFIG.DICT_ID_EN_COLS;
 
-  // 1) Exact match (case-insensitive)
   try {
     const { data, error } = await client()
       .from(table)
       .select(cols.target)
       .ilike(cols.source, norm)
       .limit(1);
+
     if (!error && data && data.length && data[0][cols.target]) {
       const out = { text: String(data[0][cols.target]).trim(), provider: 'local-dict' };
       dictCache.set(cacheKey, out);
@@ -555,35 +558,6 @@ async function translateFromLocalDict(text, sourceLanguage, targetLanguage) {
     }
   } catch (e) {
     console.warn('dict exact match error', e);
-  }
-
-  // 2) Multi-word: translate per word, minimal 50% match
-  const words = norm.split(' ').filter(Boolean);
-  if (words.length > 1) {
-    const translated = [];
-    let found = 0;
-    for (const w of words) {
-      try {
-        const { data, error } = await client()
-          .from(table)
-          .select(cols.target)
-          .ilike(cols.source, w)
-          .limit(1);
-        if (!error && data && data.length && data[0][cols.target]) {
-          translated.push(String(data[0][cols.target]).trim());
-          found++;
-        } else {
-          translated.push(w);
-        }
-      } catch (e) {
-        translated.push(w);
-      }
-    }
-    if (found >= Math.ceil(words.length * 0.5)) {
-      const out = { text: translated.join(' '), provider: 'local-dict-partial' };
-      dictCache.set(cacheKey, out);
-      return out;
-    }
   }
 
   return null;
@@ -634,7 +608,7 @@ async function translateMessage(text, sourceLanguage, targetLanguage) {
     }
   }
 
-  // 🔵 PRIORITAS 3: MyMemory fallback
+  // 🔵 PRIORITAS 3: MyMemory fallback (kalimat utuh)
   try {
     const url =
       `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}` +
