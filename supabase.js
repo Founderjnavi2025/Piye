@@ -565,48 +565,108 @@ async function unsubscribeAll() {
 // Cache terjemahan in-memory untuk mengurangi request berulang dalam sesi.
 const translationCache = new Map(); // key: `${text}|${src}|${tgt}` -> string
 
+
 async function translateMessage(text, sourceLanguage, targetLanguage) {
   if (!text || !text.trim()) return '';
   if (sourceLanguage === targetLanguage) return text;
 
   const key = `${text}|${sourceLanguage}|${targetLanguage}`;
-  if (translationCache.has(key)) return translationCache.get(key);
+  if (translationCache.has(key)) {
+    return translationCache.get(key);
+  }
 
-  // 1. Try Edge Function if configured
+  // 1. Cari di kamus gKamus Supabase untuk pasangan ID <-> EN.
+  const cleanText = text.trim();
+
+  if (sourceLanguage === 'id' && targetLanguage === 'en') {
+    try {
+      const { data, error } = await client().rpc('cari_kamus', {
+        kata: cleanText,
+        arah: 'id_en',
+      });
+
+      if (!error && data?.length && data[0].trans) {
+        const result = data[0].trans;
+        translationCache.set(key, result);
+        return result;
+      }
+    } catch (e) {
+      console.warn('Kamus ID-EN gagal:', e);
+    }
+  }
+
+  if (sourceLanguage === 'en' && targetLanguage === 'id') {
+    try {
+      const { data, error } = await client().rpc('cari_kamus_en_id', {
+        kata: cleanText,
+      });
+
+      if (!error && data?.length && data[0].trans) {
+        const result = data[0].trans;
+        translationCache.set(key, result);
+        return result;
+      }
+    } catch (e) {
+      console.warn('Kamus EN-ID gagal:', e);
+    }
+  }
+
+  // 2. Kalau kata tidak ditemukan atau bahasanya berbeda,
+  // lanjutkan ke sistem terjemahan lama.
   if (PIYE_CONFIG.translateEndpoint) {
     try {
       const res = await fetch(PIYE_CONFIG.translateEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, source: sourceLanguage, target: targetLanguage }),
+        body: JSON.stringify({
+          text,
+          source: sourceLanguage,
+          target: targetLanguage,
+        }),
       });
+
       if (res.ok) {
         const json = await res.json();
-        const out = json.translated_text || json.translation || json.text;
-        if (out) { translationCache.set(key, out); return out; }
+        const out =
+          json.translated_text || json.translation || json.text;
+
+        if (out) {
+          translationCache.set(key, out);
+          return out;
+        }
       }
     } catch (e) {
-      console.warn('Edge translate failed, falling back to MyMemory', e);
+      console.warn('Edge translate gagal:', e);
     }
   }
 
-  // 2. Public MyMemory API (no key, rate-limited)
+  // 3. Fallback MyMemory untuk kalimat dan bahasa lainnya.
   try {
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLanguage}|${targetLanguage}`;
+    const url =
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}` +
+      `&langpair=${sourceLanguage}|${targetLanguage}`;
+
     const res = await fetch(url);
-    if (!res.ok) throw new Error('Translation request failed: ' + res.status);
+    if (!res.ok) {
+      throw new Error('Translation request failed: ' + res.status);
+    }
+
     const json = await res.json();
     const out = json?.responseData?.translatedText;
-    if (out && typeof out === 'string' && !/MYMEMORY WARNING/i.test(out)) {
+
+    if (out && typeof out === 'string' &&
+        !/MYMEMORY WARNING/i.test(out)) {
       translationCache.set(key, out);
       return out;
     }
-    throw new Error('Translation tidak tersedia dari provider.');
+
+    throw new Error('Terjemahan tidak tersedia.');
   } catch (e) {
-    console.warn('translateMessage error', e);
+    console.warn('translateMessage error:', e);
     throw new Error('Terjemahan belum tersedia.');
   }
 }
+
 
 // Reading guide sederhana untuk beberapa skrip.
 // Untuk produksi, gunakan Edge Function dengan library khusus (pinyin, kuroshiro, dll).
