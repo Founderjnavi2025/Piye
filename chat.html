@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PIYE — Chat</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<div id="auth-check" class="section active">
+  <div class="login-box">
+    <p class="info">Memeriksa sesi...</p>
+  </div>
+</div>
+
+<div id="chat-content" class="hidden">
+  <div class="header-row">
+    <h2>PIYE Chat</h2>
+    <div>
+      <a id="link-admin" href="admin.html" class="button-link secondary small hidden">Admin</a>
+      <button id="btn-logout" class="small danger">Keluar</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="info small">Masuk sebagai: <strong id="chat-user-email">—</strong></p>
+  </div>
+
+  <div class="card">
+    <h3>Selamat datang di PIYE</h3>
+    <p class="info">
+      PIYE adalah aplikasi chat terjemahan multibahasa.
+      Fitur mengirim pesan, daftar teman, dan terjemahan otomatis
+      akan tersedia pada tahap berikutnya.
+    </p>
+    <p class="info small">
+      Catatan: halaman ini adalah placeholder. Pengiriman pesan dan
+      terjemahan belum aktif karena tabel chat belum dibuat di database.
+    </p>
+  </div>
+</div>
+
+<script src="supabase.js"></script>
+<script src="js/chat.js"></script>
+</body>
+</html>
