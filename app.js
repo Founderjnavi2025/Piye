@@ -46,6 +46,8 @@ function bindEvents() {
   $('btn-register').addEventListener('click', handleRegister);
   $('btn-logout-1').addEventListener('click', handleLogout);
   $('btn-logout-2').addEventListener('click', handleLogout);
+  // BARU: tombol logout di halaman chat
+  $('btn-logout-chat').addEventListener('click', handleLogout);
 
   // Template
   $('btn-download-template').addEventListener('click', downloadTemplate);
@@ -124,6 +126,7 @@ async function handleLogin() {
     }
 
     currentUser = data.user;
+    msg.textContent = '';
     await handleAfterLogin();
   } catch (err) {
     msg.className = 'message error';
@@ -183,8 +186,13 @@ async function handleLogout() {
   showSection('section-login');
   $('login-password').value = '';
   $('login-message').textContent = '';
+  // Bersihkan juga state chat
+  if ($('chat-user-email')) $('chat-user-email').textContent = '—';
 }
 
+// ============================================================
+// DIUBAH: Arahkan admin ke dashboard, user biasa ke chat
+// ============================================================
 async function handleAfterLogin() {
   var result = await checkIsAdmin();
   isAdmin = result.isAdmin;
@@ -192,8 +200,9 @@ async function handleAfterLogin() {
   if (isAdmin) {
     showSection('section-admin');
   } else {
-    $('not-admin-email').textContent = currentUser ? currentUser.email : '';
-    showSection('section-not-admin');
+    // BARU: pengguna biasa masuk ke halaman chat, bukan "Akses Ditolak"
+    $('chat-user-email').textContent = currentUser ? currentUser.email : '—';
+    showSection('section-chat');
   }
 }
 
@@ -222,7 +231,6 @@ function downloadTemplate() {
 // ============================================================
 
 function parseCSVFull(text) {
-  // Hapus BOM
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
 
   var rows = [];
@@ -237,7 +245,6 @@ function parseCSVFull(text) {
 
     if (inQuotes) {
       if (ch === '"') {
-        // Cek escaped quote ""
         if (i + 1 < len && text[i + 1] === '"') {
           currentField += '"';
           i += 2;
@@ -258,7 +265,6 @@ function parseCSVFull(text) {
         currentField = '';
         i++;
       } else if (ch === '\r') {
-        // Skip CR, handle LF next
         i++;
       } else if (ch === '\n') {
         currentRow.push(currentField);
@@ -275,7 +281,6 @@ function parseCSVFull(text) {
     }
   }
 
-  // Baris terakhir tanpa newline
   if (currentField !== '' || currentRow.length > 0) {
     currentRow.push(currentField);
     if (!(currentRow.length === 1 && currentRow[0] === '')) {
@@ -299,7 +304,6 @@ async function handleFileSelect(e) {
   $('preview-area').classList.add('hidden');
   $('summary-area').classList.add('hidden');
 
-  // Batas ukuran 50MB
   if (file.size > 50 * 1024 * 1024) {
     $('file-info').textContent = '';
     alert('File terlalu besar. Maksimal 50MB.');
@@ -324,7 +328,6 @@ async function handleFileSelect(e) {
     return;
   }
 
-  // Validasi header
   var header = rawRows[0].map(function (h) { return h.trim().toLowerCase(); });
   var expected = ['source_lang', 'target_lang', 'source_text', 'target_text'];
   var headerOk = expected.every(function (h, idx) { return header[idx] === h; });
@@ -335,15 +338,13 @@ async function handleFileSelect(e) {
     return;
   }
 
-  // Validasi baris
   var valid = [];
   var invalid = 0;
-  var seenKeys = {}; // deteksi duplikat dalam file
+  var seenKeys = {};
 
   for (var i = 1; i < rawRows.length; i++) {
     var cols = rawRows[i];
 
-    // Lewati baris kosong
     if (cols.length === 1 && cols[0].trim() === '') continue;
 
     if (cols.length !== 4) { invalid++; continue; }
@@ -356,13 +357,8 @@ async function handleFileSelect(e) {
     if (!sl || !tl || !st || !tt) { invalid++; continue; }
     if (sl === tl) { invalid++; continue; }
 
-    // Deteksi duplikat dalam file (kunci sama, terjemahan beda = konflik)
     var key = sl + '|' + tl + '|' + st;
-    if (seenKeys[key]) {
-      // Duplikat dalam file: lewati, hitung sebagai invalid (duplikat internal)
-      invalid++;
-      continue;
-    }
+    if (seenKeys[key]) { invalid++; continue; }
     seenKeys[key] = true;
 
     valid.push({
@@ -380,7 +376,6 @@ async function handleFileSelect(e) {
     invalid: invalid
   };
 
-  // Tampilkan pratinjau
   renderPreview(valid.slice(0, 10));
   $('preview-summary').textContent =
     'Total baris data: ' + previewStats.total +
@@ -438,17 +433,14 @@ async function startImport() {
   $('progress-text').textContent = '0%';
   $('progress-detail').textContent = '';
 
-  var imported = 0;    // baris baru yang berhasil di-insert
-  var updated = 0;     // baris yang sudah ada dan di-update
-  var failed = 0;      // baris yang gagal karena error database
+  var imported = 0;
+  var failed = 0;
   var processed = 0;
 
-  // Hitung hash file sederhana (untuk file_hash)
   var fileInput = $('file-input');
   var filename = fileInput.files[0] ? fileInput.files[0].name : 'unknown.csv';
   var fileHash = await computeFileHash(fileInput.files[0]);
 
-  // Buat record import_history
   var { data: histData, error: histError } = await supabaseClient
     .from('import_history')
     .insert({
@@ -470,58 +462,10 @@ async function startImport() {
 
   currentImportId = histData.id;
 
-  // Proses per batch
   for (var i = 0; i < total; i += BATCH_SIZE) {
     if (cancelImport) break;
 
     var batch = previewRows.slice(i, i + BATCH_SIZE);
-
-    // Upsert: update jika konflik, insert jika baru.
-    // Untuk menghitung berapa yang baru vs update, kita gunakan pendekatan:
-    // 1. Coba select dulu kunci yang sudah ada di batch ini.
-    // 2. Lalu upsert.
-    // Ini menambah 1 request per batch, tetapi memberi akurasi.
-    var keys = batch.map(function (r) {
-      return { sl: r.source_lang, tl: r.target_lang, st: r.source_text };
-    });
-
-    // Cek baris yang sudah ada
-    var existingKeys = new Set();
-    // Query existing: gunakan OR filter (maksimal ~20-30 kondisi per request, jadi kita chunk)
-    // Untuk batch 500, kita perlu beberapa query. Ini bisa berat.
-    // Alternatif: gunakan RPC yang mengembalikan xmax? Tidak tersedia di client.
-    // Pendekatan sederhana: gunakan upsert dengan select, lalu bandingkan created_at? Tidak akurat.
-    //
-    // Strategi akhir: kita tidak membedakan insert vs update secara presisi.
-    // Kita catat:
-    // - imported_rows = jumlah baris yang berhasil diproses oleh database (upsert sukses).
-    // - duplicate_rows = perkiraan berdasarkan pengecekan cepat: jika upsert sukses,
-    //   kita anggap baris yang sudah ada sebagai "updated" dan yang baru sebagai "imported".
-    //   Untuk akurasi, kita akan query count existing sebelum upsert.
-    //
-    // Untuk menghindari query per batch yang mahal, kita gunakan pendekatan:
-    // - Setiap batch: lakukan upsert.
-    // - Setelah upsert, hitung berapa baris di batch yang ada di database SEBELUMnya.
-    //   Kita bisa query count dengan filter IN pada source_text? Tidak praktis.
-    //
-    // Solusi pragmatis: kita laporkan imported_rows sebagai jumlah baris yang diproses
-    // (berhasil upsert), dan duplicate_rows sebagai 0 (karena kita tidak bisa membedakan
-    // tanpa overhead besar). Ini jujur: kita tidak mengklaim duplikat terdeteksi presisi.
-    //
-    // Namun, pengguna ingin "deteksi duplikat dan konflik terjemahan".
-    // Kita bisa deteksi duplikat DI DALAM FILE (sudah dilakukan).
-    // Untuk duplikat dengan database, kita bisa cek per batch dengan query:
-    //   select source_text from dictionary where (source_lang, target_lang, source_text) in (...)
-    // Tapi IN tuple tidak didukung langsung di PostgREST.
-    // Kita bisa gunakan .in('source_text', [...]) lalu filter manual, tapi ini bisa lambat.
-    //
-    // KEPUTUSAN: Untuk versi ini, kita catat:
-    // - imported_rows: baris yang berhasil di-upsert (insert ATAU update).
-    // - duplicate_rows: 0 (tidak dihitung presisi; ini akan didokumentasikan).
-    // - rejected_rows: baris yang gagal di batch (jika batch error total).
-    //
-    // Ini memenuhi persyaratan "jangan mengklaim baris berhasil jika operasi database gagal",
-    // dan kita tidak mengklaim duplikat terdeteksi presisi jika tidak.
 
     var payload = batch.map(function (r) {
       return {
@@ -540,29 +484,20 @@ async function startImport() {
       })
       .select('id');
 
-    var batchSuccess = 0;
-    var batchFailed = 0;
-
     if (upsertError) {
-      // Batch gagal total
-      batchFailed = batch.length;
-      failed += batchFailed;
+      failed += batch.length;
       console.error('Batch gagal (baris ' + (i + 1) + '-' + (i + batch.length) + '):', upsertError.message);
     } else {
-      // Upsert sukses; hitung berhasil
-      batchSuccess = upsertData ? upsertData.length : batch.length;
-      imported += batchSuccess;
+      imported += (upsertData ? upsertData.length : batch.length);
     }
 
     processed += batch.length;
 
-    // Update progres
     var pct = Math.round((processed / total) * 100);
     $('progress-bar').value = pct;
     $('progress-text').textContent = pct + '% — ' + processed + ' / ' + total + ' baris';
     $('progress-detail').textContent = 'Berhasil diproses: ' + imported + ' | Gagal: ' + failed;
 
-    // Update import_history setiap batch
     await supabaseClient
       .from('import_history')
       .update({
@@ -573,11 +508,9 @@ async function startImport() {
       })
       .eq('id', currentImportId);
 
-    // Cek pembatalan setelah batch selesai
     if (cancelImport) break;
   }
 
-  // Finalisasi
   var finalStatus;
   if (cancelImport) {
     finalStatus = 'cancelled';
@@ -605,7 +538,6 @@ async function startImport() {
     })
     .eq('id', currentImportId);
 
-  // Tampilkan ringkasan
   isImporting = false;
   $('progress-area').classList.add('hidden');
   $('summary-area').classList.remove('hidden');
