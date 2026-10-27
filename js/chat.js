@@ -1,3 +1,4 @@
+
 // ============================================================
 // PIYE — Halaman Pengguna (placeholder chat)
 // ============================================================
@@ -13,4 +14,20 @@ document.addEventListener('DOMContentLoaded', async function () {
 
   // Tampilkan link ke panel admin hanya jika benar-benar admin
   // (link hanya kosmetik; proteksi sebenarnya ada di admin.html via requireAdmin)
-  var
+  var result = await checkIsAdmin();
+  if (result.isAdmin) {
+    $('link-admin').classList.remove('hidden');
+  }
+
+  $('auth-check').classList.remove('active');
+  $('chat-content').classList.remove('hidden');
+
+  $('btn-logout').addEventListener('click', logoutAndRedirect);
+
+  // Realtime logout lintas tab: jika sesi berakhir, redirect ke login
+  supabaseClient.auth.onAuthStateChange(function (event) {
+    if (event === 'SIGNED_OUT') {
+      window.location.replace('index.html');
+    }
+  });
+});
