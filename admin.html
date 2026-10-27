@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PIYE — Admin Kamus</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<!-- Loading overlay saat cek admin -->
+<div id="auth-check" class="section active">
+  <div class="login-box">
+    <p class="info">Memeriksa hak akses...</p>
+  </div>
+</div>
+
+<!-- Konten admin, tersembunyi sampai lolos cek -->
+<div id="admin-content" class="hidden">
+  <div class="header-row">
+    <h2>Admin Kamus</h2>
+    <div>
+      <a href="chat.html" class="button-link secondary small">Chat</a>
+      <button id="btn-logout" class="small danger">Keluar</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="import">Impor</button>
+    <button class="tab" data-tab="history">Riwayat</button>
+    <button class="tab" data-tab="manage">Kelola</button>
+  </div>
+
+  <!-- Panel Impor -->
+  <div id="panel-import" class="panel active">
+    <div class="card">
+      <h3>Unduh Template</h3>
+      <p class="info">Gunakan template ini agar format CSV sesuai.</p>
+      <button id="btn-download-template" class="secondary">Unduh Template CSV</button>
+    </div>
+
+    <div class="card">
+      <h3>Pilih File CSV</h3>
+      <label class="file-label" id="file-label">
+        <span id="file-label-text">Ketuk untuk memilih file</span>
+        <input type="file" id="file-input" accept=".csv,text/csv">
+      </label>
+      <p id="file-info" class="info"></p>
+    </div>
+
+    <div id="preview-area" class="card hidden">
+      <h3>Pratinjau Data</h3>
+      <div class="table-wrap">
+        <table id="preview-table"></table>
+      </div>
+      <p id="preview-summary" class="info"></p>
+      <div class="btn-row">
+        <button id="btn-start-import" class="primary">Mulai Impor</button>
+        <button id="btn-cancel-preview" class="secondary">Batal</button>
+      </div>
+    </div>
+
+    <div id="progress-area" class="card hidden">
+      <h3>Progres Impor</h3>
+      <progress id="progress-bar" value="0" max="100"></progress>
+      <p id="progress-text" class="info"></p>
+      <p id="progress-detail" class="info small"></p>
+      <button id="btn-cancel-import" class="secondary danger">Batalkan Impor</button>
+    </div>
+
+    <div id="summary-area" class="card hidden">
+      <h3>Ringkasan Impor</h3>
+      <div id="summary-content"></div>
+      <button id="btn-new-import" class="primary">Impor Lagi</button>
+    </div>
+  </div>
+
+  <!-- Panel Riwayat -->
+  <div id="panel-history" class="panel">
+    <div class="card">
+      <div class="header-row-inline">
+        <h3>Riwayat Impor</h3>
+        <button id="btn-refresh-history" class="small secondary">Muat Ulang</button>
+      </div>
+      <div id="history-list">
+        <p class="info">Tekan "Muat Ulang" untuk memuat riwayat.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Panel Kelola -->
+  <div id="panel-manage" class="panel">
+    <div class="card">
+      <h3>Cari Kamus</h3>
+      <div class="search-row">
+        <input type="text" id="search-dict" placeholder="Cari source_text...">
+        <button id="btn-search-dict" class="primary small">Cari</button>
+      </div>
+      <div id="dict-results"></div>
+    </div>
+  </div>
+</div>
+
+<script src="supabase.js"></script>
+<script src="js/admin.js"></script>
+</body>
+</html>
